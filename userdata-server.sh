@@ -58,20 +58,36 @@ systemctl enable --now caldera.service
 
 # --- Caddy reverse proxy: expose the UI on 443 (HTTPS) so a browser can reach it
 #     through firewalls that only allow 443 — NO local tooling needed on the client.
-#     Self-signed (tls internal): the browser shows a one-time cert warning. ---
+#     Self-signed cert: the browser shows a one-time cert warning ("proceed"). ---
 apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
 apt-get update -y
 apt-get install -y caddy
 
+# Generate an explicit self-signed cert and hand it to Caddy directly.
+#   WHY NOT `tls internal`: on a hostname-less `:443` site, Caddy's internal issuer
+#   has no name to pre-issue a cert for and won't mint one on-demand for an arbitrary
+#   IP/SNI. Connecting by the EC2 public IP then yields NO certificate and a TLS
+#   "internal error" alert -> the browser shows "This site can't provide a secure
+#   connection" with no way to proceed (not the intended cert *warning*).
+#   An explicit cert file is always presented regardless of SNI/IP, so the browser
+#   gets the expected one-time self-signed warning and can proceed.
+TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+PUBIP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4)
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout /etc/caddy/caldera.key -out /etc/caddy/caldera.crt -days 3650 \
+  -subj "/CN=caldera-lab" -addext "subjectAltName=IP:${PUBIP},DNS:localhost"
+chown caddy:caddy /etc/caddy/caldera.key /etc/caddy/caldera.crt
+chmod 600 /etc/caddy/caldera.key
+chmod 644 /etc/caddy/caldera.crt
+
 cat > /etc/caddy/Caddyfile <<'CADDY'
 {
-	# self-signed local CA; no ACME/Let's Encrypt dependency (robust offline)
 	auto_https disable_redirects
 }
 :443 {
-	tls internal
+	tls /etc/caddy/caldera.crt /etc/caddy/caldera.key
 	reverse_proxy localhost:8888
 }
 CADDY
