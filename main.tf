@@ -75,13 +75,15 @@ resource "aws_security_group" "server" {
     protocol    = "tcp"
     cidr_blocks = [data.aws_vpc.default.cidr_block]
   }
-  # Optional: expose the UI publicly to a single IP (normally unnecessary — use SSM).
+  # Browser access to the UI over HTTPS/443 (Caddy reverse-proxy -> 8888).
+  # Set ui_cidr to let students' browsers in (works through 443-only firewalls,
+  # no client-side tooling). Leave empty to keep it closed and use SSM instead.
   dynamic "ingress" {
     for_each = var.ui_cidr == "" ? [] : [var.ui_cidr]
     content {
-      description = "CALDERA UI direct (optional)"
-      from_port   = 8888
-      to_port     = 8888
+      description = "CALDERA UI via HTTPS (Caddy)"
+      from_port   = 443
+      to_port     = 443
       protocol    = "tcp"
       cidr_blocks = [ingress.value]
     }

@@ -10,6 +10,12 @@ output "server_public_ip" {
   value = aws_instance.server.public_ip
 }
 
+# Browser-only UI access (needs var.ui_cidr to allow your browser's IP on 443).
+# Self-signed cert -> accept the one-time browser warning. Works through 443-only firewalls.
+output "ui_url" {
+  value = "https://${aws_instance.server.public_ip}  (login red/admin; accept the self-signed cert warning)"
+}
+
 output "victim_instance_ids" {
   value = aws_instance.victim[*].id
 }

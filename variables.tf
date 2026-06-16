@@ -41,7 +41,7 @@ variable "agent_group" {
 }
 
 variable "ui_cidr" {
-  description = "Optional: open CALDERA UI (8888) directly to this CIDR. Normally leave empty and view the UI via SSM port forwarding (works through restrictive firewalls)."
+  description = "Open the CALDERA UI over HTTPS/443 (Caddy reverse-proxy) to this CIDR so a plain browser can reach it through 443-only firewalls — no client tooling needed. Set to a student's browser public IP (x.x.x.x/32), a campus CIDR, or 0.0.0.0/0 for a quick throwaway lab. Empty = closed (use SSM instead)."
   type        = string
   default     = ""
 }

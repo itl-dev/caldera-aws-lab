@@ -27,21 +27,28 @@ cd caldera-aws-lab
 # 2. CloudShell 準備（Terraform導入 + 共有プラグインキャッシュ）。source で実行すること
 source ./setup.sh
 
-# 3. 構築（サーバ+やられ役1台）。5〜10分でUIビルド完了
+# 3. 構築。UIを手元ブラウザで見るため、自分のグローバルIPに 443 を開ける
+#    ★IPは「手元ブラウザで https://ifconfig.me を開いて」確認する
+#     （CloudShell の curl ifconfig.me は CloudShell のIPになるので使わない）
 terraform init
-terraform apply -auto-approve
+terraform apply -auto-approve -var "ui_cidr=<手元のグローバルIP>/32"
+#    手早く試すだけなら -var "ui_cidr=0.0.0.0/0"（全公開・要注意。CALDERAはログインあり）
 
-# 4. エージェント登録の確認（数分後）。出力されたコマンドを実行
+# 4. UIのURLを取得 → 手元ブラウザで開く（自己署名の証明書警告は「許可して進む」。ログイン red/admin）
+terraform output -raw ui_url
+#    ※UIビルドに5〜10分。直後は 502/未応答 のことがあるので少し待つ
+
+# 5. エージェント登録の確認（数分後）
 terraform output -raw check_agents | bash
-#   => get-command-invocation で StandardOutputContent を見ると登録エージェントが分かる
-
-# 5. UIをブラウザで開く（FW回避：SSMポートフォワード）
-terraform output -raw open_ui_via_ssm
-#   表示されたコマンドを別タブで実行 → http://localhost:8888 （ログイン: red/admin）
+#    => get-command-invocation で StandardOutputContent を見ると登録エージェントが分かる
 
 # 6. 片付け（課金停止）
 terraform destroy -auto-approve
 ```
+
+> ✅ **UIは手元ブラウザだけで開けます**（aws CLI 等のローカルインストール不要）。サーバ上の Caddy が
+> `443/HTTPS → CALDERA(8888)` を中継するので、大学等が 443 しか通さないFWでもアクセスできます。
+> 自己署名証明書のため初回だけブラウザ警告が出ます（infosec 的にはむしろ教材）。
 
 > ⚠️ CloudShell の `/home` 永続領域は **1GB**。`setup.sh` が設定する共有プラグインキャッシュ
 > (`TF_PLUGIN_CACHE_DIR`) を使わないと AWS provider の重複DLで容量超過します。必ず `source ./setup.sh` を。
@@ -56,7 +63,7 @@ terraform destroy -auto-approve
 | `victim_instance_type` | `t3.medium` | やられ役サイズ（large まで） |
 | `server_instance_type` | `t3.large` | サーバサイズ |
 | `agent_group` | `red` | CALDERA 上のエージェントグループ名 |
-| `ui_cidr` | `""` | UIを直接公開したいIP `x.x.x.x/32`（通常は不要・SSM推奨） |
+| `ui_cidr` | `""` | UI(HTTPS/443)を開けるIP `x.x.x.x/32`。手元ブラウザのグローバルIP、または `0.0.0.0/0`。空=非公開(SSM運用) |
 | `rdp_cidr` | `""` | やられ役にRDPを開けたいIP `x.x.x.x/32`（GUIで実画面を見たい時） |
 | `disable_realtime_protection` | `false` | Defenderリアルタイム保護も無効化を試みる（Tamper Protectionで弾かれる場合あり） |
 
@@ -67,20 +74,45 @@ terraform apply -auto-approve -var victim_count=3 -var "rdp_cidr=$(curl -s ifcon
 
 ---
 
-## アクセス方法（すべて SSM = FWを通る）
+## UIをブラウザで開く（受講生向け・ローカルインストール不要）
+
+サーバ上の **Caddy** が `443/HTTPS → CALDERA(8888)` を中継しています。`ui_cidr` で自分のIPに 443 を開ければ、
+**手元ブラウザで直接アクセスできます**（aws CLI も session-manager-plugin も不要）。大学FWが 443 を通す限り到達可能。
 
 ```bash
-# サーバへキーレスでシェル
-terraform output -raw ssm_shell_server | bash
+# CloudShell で（apply 時に ui_cidr を渡していれば、あとはURLを開くだけ）
+terraform output -raw ui_url
+#  => https://<server_public_ip>  を手元ブラウザで開く
+```
+- ログイン: **`red` / `admin`**（または `admin`/`admin`）
+- 初回は**自己署名証明書の警告**が出る → 「詳細設定 → アクセスする」で進む
+- IPはサーバ stop/start で変わるので、その都度 `terraform output -raw ui_url` で確認
+- 自分のグローバルIPは**手元ブラウザで** https://ifconfig.me を開いて確認（CloudShellのcurlは不可）
 
-# UIをローカルブラウザで（ポートフォワード）→ http://localhost:8888
-terraform output -raw open_ui_via_ssm    # 表示コマンドを実行
+> 証明書警告も出したくない場合は、`<public-ip>.sslip.io` + Let's Encrypt で無警告TLSにできます（要 80/443 開放）。
+> 現状は外部依存のない自己署名を既定にしています。
+
+## UIを非公開のまま見る（教員向け・SSMポートフォワード）
+
+公開したくない（`ui_cidr` を開けたくない）ときは、**手元PC**から SSM ポートフォワードで見られます。
+※この方法は手元PCに aws CLI + session-manager-plugin + Learner Lab 認証が必要（受講生配布には不向き）。
+※CloudShell 内で張っても手元ブラウザからは見えない（CloudShellの localhost は別物）ので、必ず手元PCで実行。
+
+```bash
+aws ssm start-session --target <server_instance_id> --region us-east-1 \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["8888"],"localPortNumber":["8888"]}'
+# 張ったまま手元ブラウザで http://localhost:8888
 ```
 
-CALDERA ログイン: **`red` / `admin`**（または `admin`/`admin`）。API キー: `ADMIN123`（`--insecure` で `conf/default.yml` 使用）。
+## サーバへキーレスでシェル
 
-RDP で実画面を見たい場合のみ、`-var "rdp_cidr=<自IP>/32"` で 3389 を開け、
-`get-password-data` でパスワードを復号して接続（大学FWが3389を許可している必要あり）。
+```bash
+terraform output -raw ssm_shell_server | bash    # CloudShell で実行可（SSM=443）
+```
+
+API キー: `ADMIN123`（`--insecure` で `conf/default.yml` 使用）。
+RDP で実画面を見たい場合のみ `-var "rdp_cidr=<自IP>/32"` で 3389 を開け、`get-password-data` で復号して接続（FWが3389を通す必要あり）。
 
 ---
 
@@ -89,6 +121,7 @@ RDP で実画面を見たい場合のみ、`-var "rdp_cidr=<自IP>/32"` で 3389
 - **AMI**: Amazon製 Quick Start（Ubuntu 22.04 / Windows Server 2022 Base）を `data` で自動最新解決。Marketplace AMIはLearner Lab非対応のため不使用。
 - **SSM**: `LabInstanceProfile`（=`LabRole`）を両インスタンスに付与。鍵もRDPも使わずシェル/ポートフォワードが可能。
 - **サーバ**: `systemd` 常駐（Learner Lab のセッション stop/start 後も自動復帰）。UIは Node 20 でビルド、sandcat は Go でオンデマンドコンパイル（systemdに `HOME`/`GOPATH`/`GOCACHE` を設定済み）。
+- **UI公開**: `Caddy` が `443/HTTPS → 8888` を自己署名TLSで中継。受講生はブラウザのみでアクセス可（443を通すFWで到達）。`ui_cidr` でアクセス元を制限。
 - **やられ役**: EC2 ユーザーデータ(PowerShell)で Defender 除外 → sandcat を **最大30分リトライ**でDL・常駐。サーバ起動を待たずに済む。
 
 ### トラブルシュート
