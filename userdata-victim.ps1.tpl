@@ -19,6 +19,25 @@ Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
 Set-MpPreference -DisableIOAVProtection      $true -ErrorAction SilentlyContinue
 %{ endif ~}
 
+# --- 1c. Enable RDP + set a known Administrator password ------
+# Lets the browser-based Guacamole gateway (and optional direct RDP via rdp_cidr)
+# log in. NLA/SecurityLayer are disabled because a Mac/Guacamole RDP client with a
+# local account otherwise fails CredSSP pre-auth ("The credentials did not work")
+# even with the correct password.
+$adminPass = "${victim_admin_password}"
+if ($adminPass) {
+    net user Administrator "$adminPass"
+    Get-LocalUser -Name Administrator | Set-LocalUser -PasswordNeverExpires $true -ErrorAction SilentlyContinue
+    $ts  = "HKLM:\System\CurrentControlSet\Control\Terminal Server"
+    $rdp = "$ts\WinStations\RDP-Tcp"
+    Set-ItemProperty -Path $ts  -Name fDenyTSConnections  -Value 0 -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $rdp -Name UserAuthentication  -Value 0 -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $rdp -Name SecurityLayer       -Value 0 -ErrorAction SilentlyContinue
+    Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+    Set-Service -Name TermService -StartupType Automatic -ErrorAction SilentlyContinue
+    Start-Service -Name TermService -ErrorAction SilentlyContinue
+}
+
 # --- 2. Download & launch the CALDERA Sandcat agent -----------
 # Retries so boot order doesn't matter: the server may still be building.
 $server = "${caldera_server}"

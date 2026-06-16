@@ -57,3 +57,9 @@ variable "disable_realtime_protection" {
   type        = bool
   default     = false
 }
+
+variable "enable_guacamole" {
+  description = "Install Apache Guacamole on the server so students can open the victims' Windows desktops IN THE BROWSER over 443 (no RDP client, no key, no extra ports). guacd speaks RDP to victims inside the VPC; the UI is served at https://<server>/guac/ via Caddy. Needs ui_cidr open (same as the CALDERA UI)."
+  type        = bool
+  default     = true
+}

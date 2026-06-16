@@ -39,3 +39,22 @@ output "check_agents" {
 output "ui_login_hint" {
   value = "CALDERA UI login: red/admin (or admin/admin). API key: ADMIN123 (default.yml via --insecure)."
 }
+
+# Browser-based RDP to the victims (no client/key). Needs ui_cidr open (same 443).
+output "guacamole_url" {
+  value = var.enable_guacamole ? "https://${aws_instance.server.public_ip}/guac/  (browser RDP to victims; see guacamole_login)" : "guacamole disabled (enable_guacamole=false)"
+}
+
+# Login for the Guacamole portal: `terraform output -raw guacamole_login`
+output "guacamole_login" {
+  value     = var.enable_guacamole ? "student / ${random_password.guac_login.result}" : "n/a"
+  sensitive = true
+}
+
+# Victim Windows Administrator password (set on first boot). For direct RDP via
+# rdp_cidr, or to log into the desktop once Guacamole has you on the session.
+# View with: terraform output -raw victim_admin_password
+output "victim_admin_password" {
+  value     = random_password.victim_admin.result
+  sensitive = true
+}

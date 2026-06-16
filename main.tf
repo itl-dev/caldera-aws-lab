@@ -13,6 +13,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -22,6 +26,24 @@ provider "aws" {
 
 data "aws_vpc" "default" {
   default = true
+}
+
+# Credentials shared between the victims (which set them) and the server's
+# Guacamole gateway (which uses them to RDP in). Generated per-deploy so no
+# secret lives in the repo; surfaced via `terraform output`. override_special
+# avoids characters that would break XML / bash / PowerShell quoting.
+resource "random_password" "victim_admin" {
+  length           = 20
+  special          = true
+  override_special = "!@#%^*-_=+"
+}
+
+# Login for the Guacamole web portal itself (a public RDP gateway when ui_cidr
+# is open), so it isn't protected by a guessable default. Alphanumeric for easy
+# typing by students.
+resource "random_password" "guac_login" {
+  length  = 14
+  special = false
 }
 
 # Amazon-published AMIs (Quick Start) — allowed in Learner Lab (Marketplace AMIs are not)
@@ -106,7 +128,20 @@ resource "aws_security_group" "victim" {
   dynamic "ingress" {
     for_each = var.rdp_cidr == "" ? [] : [var.rdp_cidr]
     content {
-      description = "RDP (optional)"
+      description = "RDP (optional, public)"
+      from_port   = 3389
+      to_port     = 3389
+      protocol    = "tcp"
+      cidr_blocks = [ingress.value]
+    }
+  }
+
+  # Internal 3389 so the server's Guacamole gateway (guacd) can reach victims
+  # over RDP from inside the VPC. NOT public — VPC CIDR only.
+  dynamic "ingress" {
+    for_each = var.enable_guacamole ? [data.aws_vpc.default.cidr_block] : []
+    content {
+      description = "RDP from within VPC (Guacamole browser gateway)"
       from_port   = 3389
       to_port     = 3389
       protocol    = "tcp"
@@ -133,7 +168,18 @@ resource "aws_instance" "server" {
   key_name               = var.key_name
   iam_instance_profile   = var.instance_profile # SSM Session Manager
   vpc_security_group_ids = [aws_security_group.server.id]
-  user_data              = file("${path.module}/userdata-server.sh")
+  # Compose user_data: a shebang + injected variables, then the script body.
+  # (The body uses bash ${...} heavily, so we DON'T run it through templatefile;
+  # values are passed as exported env vars instead.)
+  user_data = join("\n", [
+    "#!/bin/bash",
+    "export ENABLE_GUACAMOLE=${var.enable_guacamole}",
+    "export AWS_DEFAULT_REGION=${var.region}",
+    "export VICTIM_ADMIN_PASSWORD='${random_password.victim_admin.result}'",
+    "export GUAC_USER='student'",
+    "export GUAC_PASS='${random_password.guac_login.result}'",
+    file("${path.module}/userdata-server.sh"),
+  ])
 
   root_block_device {
     volume_size = 30 # node_modules + Go build need headroom (<=100GB, gp3 allowed)
@@ -157,9 +203,10 @@ resource "aws_instance" "victim" {
   get_password_data      = true
 
   user_data = templatefile("${path.module}/userdata-victim.ps1.tpl", {
-    caldera_server = "http://${aws_instance.server.private_ip}:8888"
-    agent_group    = var.agent_group
-    disable_rtp    = var.disable_realtime_protection
+    caldera_server        = "http://${aws_instance.server.private_ip}:8888"
+    agent_group           = var.agent_group
+    disable_rtp           = var.disable_realtime_protection
+    victim_admin_password = var.enable_guacamole || var.rdp_cidr != "" ? random_password.victim_admin.result : ""
   })
 
   tags = { Name = "caldera-victim-${count.index + 1}" }
