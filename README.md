@@ -121,7 +121,13 @@ API キー: `ADMIN123`（`--insecure` で `conf/default.yml` 使用）。
 **RDPクライアントも鍵も3389開放も不要**——大学等が 443 しか通さないFWでも到達できます。
 
 ```bash
-# UIと同じく ui_cidr が開いていること（apply 時に渡す）。URLとログインを取得:
+# UIと同じく ui_cidr が開いていること（apply 時に渡す）。
+# enable_guacamole=true のとき、apply 後に URL・ユーザ・パスがまとめて表示される:
+terraform output guacamole
+#   URL : https://<server_public_ip>/guac/   (accept the self-signed cert warning)
+#   User: student
+#   Pass: <自動生成パスワード>
+# 個別に取りたい場合:
 terraform output -raw guacamole_url       # => https://<server_public_ip>/guac/
 terraform output -raw guacamole_login     # => student / <自動生成パスワード>
 ```

@@ -7,17 +7,40 @@ $pub = "C:\Users\Public"
 $agentPath = "$pub\splunkd.exe"   # disguised name CALDERA's sandcat uses by default
 
 # --- 1. Windows Defender: stop quarantining the agent ---------
-# Targeted exclusions (these usually work even with Tamper Protection on):
-Add-MpPreference -ExclusionPath $pub          -ErrorAction SilentlyContinue
-Add-MpPreference -ExclusionPath $agentPath    -ErrorAction SilentlyContinue
-Add-MpPreference -ExclusionProcess "splunkd.exe" -ErrorAction SilentlyContinue
-Set-MpPreference  -SubmitSamplesConsent 2     -ErrorAction SilentlyContinue   # never send samples
-Set-MpPreference  -MAPSReporting 0            -ErrorAction SilentlyContinue   # disable cloud lookup
+# Defender flags sandcat (splunkd.exe) as a hacktool and re-quarantines it on
+# every launch (Resources: C:\Users\Public\splunkd.exe). The path/process
+# exclusions below are the fix -- BUT at very early first boot the Defender
+# management layer is sometimes not ready, so Add-MpPreference fails *silently*
+# and leaves NO exclusion. The agent then gets eaten on every download retry
+# until the 60-min loop gives up. So we (a) wrap the exclusions in a function,
+# (b) WAIT and VERIFY the exclusion actually stuck before downloading anything,
+# and (c) re-assert them on every download attempt (a Defender platform/signature
+# update can reset preferences mid-flight).
+function Set-AgentExclusions {
+    Add-MpPreference -ExclusionPath $pub             -ErrorAction SilentlyContinue
+    Add-MpPreference -ExclusionPath $agentPath       -ErrorAction SilentlyContinue
+    Add-MpPreference -ExclusionProcess "splunkd.exe" -ErrorAction SilentlyContinue
+    Set-MpPreference  -SubmitSamplesConsent 2        -ErrorAction SilentlyContinue   # never send samples
+    Set-MpPreference  -MAPSReporting 0               -ErrorAction SilentlyContinue   # disable cloud lookup
 %{ if disable_rtp ~}
-# Optional hard-off (may be blocked by Tamper Protection on fresh AMIs):
-Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
-Set-MpPreference -DisableIOAVProtection      $true -ErrorAction SilentlyContinue
+    # Optional hard-off (may be blocked by Tamper Protection on fresh AMIs):
+    Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
+    Set-MpPreference -DisableIOAVProtection      $true -ErrorAction SilentlyContinue
 %{ endif ~}
+}
+
+# Retry until Defender accepts and reports the exclusion (up to ~5 min).
+for ($d = 1; $d -le 30; $d++) {
+    Set-AgentExclusions
+    Start-Sleep -Seconds 2
+    $excl = (Get-MpPreference -ErrorAction SilentlyContinue).ExclusionPath
+    if ($excl -and ($excl -contains $pub)) {
+        Write-Output "Defender exclusion confirmed (attempt $d)"
+        break
+    }
+    Write-Output "Defender not ready / exclusion not applied yet (attempt $d); retrying in 10s"
+    Start-Sleep -Seconds 10
+}
 
 # --- 1c. Enable RDP + set a known Administrator password ------
 # Lets the browser-based Guacamole gateway (and optional direct RDP via rdp_cidr)
@@ -47,6 +70,7 @@ $group  = "${agent_group}"
 $deployed = $false
 for ($i = 1; $i -le 120; $i++) {   # up to 120 * 30s = 60 min
     try {
+        Set-AgentExclusions   # re-assert: a Defender update can silently reset these
         $wc = New-Object System.Net.WebClient
         $wc.Headers.add("platform","windows")
         $wc.Headers.add("file","sandcat.go")

@@ -40,9 +40,24 @@ output "ui_login_hint" {
   value = "CALDERA UI login: red/admin (or admin/admin). API key: ADMIN123 (default.yml via --insecure)."
 }
 
-# Browser-based RDP to the victims (no client/key). Needs ui_cidr open (same 443).
+# Browser-based RDP to the victims (no client/key). Printed in full only when
+# Guacamole is enabled, so students can copy the URL + portal credentials straight
+# from `terraform apply` output. Password is shown in the clear (nonsensitive) on
+# purpose: it is random per-deploy and only useful while this lab is up. Needs
+# ui_cidr to allow your browser's IP on 443.
+output "guacamole" {
+  value = var.enable_guacamole ? join("\n", [
+    "",
+    "  URL : https://${aws_instance.server.public_ip}/guac/   (accept the self-signed cert warning)",
+    "  User: student",
+    "  Pass: ${nonsensitive(random_password.guac_login.result)}",
+    "  Then open connection 'caldera-victim-1'. (Your IP must be allowed via ui_cidr.)",
+  ]) : "guacamole disabled (enable_guacamole=false)"
+}
+
+# Machine-readable single fields (for scripts).
 output "guacamole_url" {
-  value = var.enable_guacamole ? "https://${aws_instance.server.public_ip}/guac/  (browser RDP to victims; see guacamole_login)" : "guacamole disabled (enable_guacamole=false)"
+  value = var.enable_guacamole ? "https://${aws_instance.server.public_ip}/guac/" : "n/a (enable_guacamole=false)"
 }
 
 # Login for the Guacamole portal: `terraform output -raw guacamole_login`
