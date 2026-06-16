@@ -9,11 +9,27 @@ exec > /var/log/caldera-bootstrap.log 2>&1
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y git python3 python3-pip python3-venv golang-go curl
+# NOTE: do NOT install Ubuntu's `golang-go` here — on 22.04 it is Go 1.18.1, which is
+# BELOW CALDERA's required minimum (go >= 1.19, see conf/default.yml). With an old Go,
+# CALDERA logs "go does not meet the minimum version of 1.19" and the on-demand sandcat
+# compile is unreliable on first boot, so victims time out before the agent registers.
+apt-get install -y git python3 python3-pip python3-venv curl tar
 
 # Node.js 20 (CALDERA v5 'magma' Vite build requires Node 20.19+, NOT 18)
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 apt-get install -y nodejs
+
+# Go (>= 1.19) from the official tarball, so CALDERA can compile the sandcat agent.
+# Fetch the current stable version string (e.g. go1.23.4) so we never pin a release
+# that may not exist; install to /usr/local/go and symlink into /usr/local/bin, which
+# is already on the systemd unit's PATH below.
+GO_VERSION="$(curl -fsSL 'https://go.dev/VERSION?m=text' | head -1)"
+curl -fsSL "https://go.dev/dl/${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tgz
+rm -rf /usr/local/go
+tar -C /usr/local -xzf /tmp/go.tgz
+ln -sf /usr/local/go/bin/go /usr/local/bin/go
+ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+/usr/local/bin/go version
 
 # --- fetch CALDERA ---
 cd /opt
