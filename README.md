@@ -159,6 +159,18 @@ terraform output -raw ui_url                # 新しい IP の UI を開く
     ```
 - 注意: `terraform apply` ではなく `terraform output` だけ見ると **古い IP のまま**なので必ず apply を先に。
 
+## やられ役にエージェントを手動デプロイする（受講生向け）
+
+自動デプロイに頼らず、受講生自身に配備させたいとき（演習として／自動登録が落ちたときの復旧）。**Guacamole で入って PowerShell に貼るだけ**。
+
+1. `https://<server>/guac/` でやられ役のデスクトップを開く（[Guacamole の節](#やられ役のデスクトップをブラウザで見るguacamole受講生向け)）。
+2. スタート → `PowerShell` を起動。
+3. **CALDERA UI 上で** `agents` → `Deploy an agent` → `Sandcat`／`windows` を選び、表示された PowerShell コマンドをコピーして貼り付け、Enter。
+
+> このコマンドの接続先（`$server`）は CALDERA の `app.contact.http` から生成されます。本リポジトリではサーバ起動時に **`app.contact.http` をサーバの private IP に自動設定**するので、UI が出すコマンドはそのまま動きます（既定の `http://0.0.0.0:8888` は宛先として無効で、IP を手で直す必要があった）。
+>
+> victim → サーバ 8888 は **VPC 内部のみ許可**なので、接続先は必ず **private IP**（public IP や 0.0.0.0 は不可）。private IP は stop/start で不変なので、コマンドはセッションを跨いで使い回せます。
+
 ## 仕組み / 設計メモ
 
 - **AMI**: Amazon製 Quick Start（Ubuntu 22.04 / Windows Server 2022 Base）を `data` で自動最新解決。Marketplace AMIはLearner Lab非対応のため不使用。

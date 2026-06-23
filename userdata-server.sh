@@ -48,6 +48,20 @@ python3 -m venv /opt/caldera/venv
 /opt/caldera/venv/bin/pip install --upgrade pip wheel
 /opt/caldera/venv/bin/pip install -r requirements.txt
 
+# --- Point agents at this server's PRIVATE IP (reachable from victims in the VPC) ---
+# CALDERA's default `app.contact.http` is http://0.0.0.0:8888, and it embeds that value
+# verbatim in the "Deploy an agent" commands shown in the UI. 0.0.0.0 is a bind-all
+# wildcard, NOT a routable destination, so a copy-pasted deploy command never connects.
+# Rewrite it to this instance's private IP so the UI hands students a working command
+# with no IP editing. The server SG only allows 8888 from inside the VPC, and the private
+# IP is stable across Learner Lab stop/start. The web app still BINDS on 0.0.0.0 via
+# `host:`/`port:` below, so Caddy's localhost:8888 proxy (the browser UI) is unaffected.
+IMDS_TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+PRIVIP=$(curl -s -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/local-ipv4)
+if [ -n "${PRIVIP:-}" ]; then
+  sed -i "s|^app.contact.http: .*|app.contact.http: http://${PRIVIP}:8888|" /opt/caldera/conf/default.yml
+fi
+
 # --- systemd unit (auto-restart, auto-start after reboot/session restart) ---
 cat > /etc/systemd/system/caldera.service <<'UNIT'
 [Unit]
