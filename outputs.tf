@@ -36,6 +36,15 @@ output "check_agents" {
   value = "aws ssm send-command --instance-ids ${aws_instance.server.id} --region ${var.region} --document-name AWS-RunShellScript --parameters 'commands=[\"curl -s -H \\\"KEY: ADMIN123\\\" http://localhost:8888/api/v2/agents\"]'"
 }
 
+# Re-launch the sandcat agent on every victim. Normally unnecessary -- the victim
+# auto-starts it on boot via the "sandcat" scheduled task -- but use this if an
+# agent shows "dead" after a Learner Lab resume, or for victims built before the
+# scheduled task existed. Targets the server's PRIVATE IP (stable across stop/start)
+# and skips victims where it is already running. Run:  terraform output -raw restart_agent | bash
+output "restart_agent" {
+  value = "aws ssm send-command --region ${var.region} --document-name AWS-RunPowerShellScript --instance-ids ${join(" ", aws_instance.victim[*].id)} --parameters 'commands=[\"if (-not (Get-Process splunkd -ErrorAction SilentlyContinue)) { Start-Process -FilePath C:\\\\Users\\\\Public\\\\splunkd.exe -ArgumentList \\\"-server http://${aws_instance.server.private_ip}:8888 -group ${var.agent_group}\\\" -WindowStyle hidden }\"]'"
+}
+
 output "ui_login_hint" {
   value = "CALDERA UI login: red/admin (or admin/admin). API key: ADMIN123 (default.yml via --insecure)."
 }
