@@ -63,3 +63,9 @@ variable "enable_guacamole" {
   type        = bool
   default     = true
 }
+
+variable "enable_emu" {
+  description = "Enable the CALDERA 'emu' plugin at build time so the server comes up FIN6-ready: it adds `- emu` to the plugin list, full-clones the MITRE CTID Adversary Emulation Library, and best-effort fetches payloads BEFORE the first start. Set false for a stockpile-only lab (Super Spy). Because a hand-enabled plugin is lost on every destroy/apply, baking it in here makes the emulation exercises reproducible with a single `terraform apply`."
+  type        = bool
+  default     = true
+}

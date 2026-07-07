@@ -65,6 +65,7 @@ terraform destroy -auto-approve
 | `agent_group` | `red` | CALDERA 上のエージェントグループ名 |
 | `ui_cidr` | `""` | UI(HTTPS/443)を開けるIP `x.x.x.x/32`。手元ブラウザのグローバルIP、または `0.0.0.0/0`。空=非公開(SSM運用) |
 | `enable_guacamole` | `true` | サーバに Apache Guacamole を入れ、`https://<server>/guac/` で**やられ役のデスクトップをブラウザRDP**（クライアント/鍵/3389開放すべて不要）。`ui_cidr` の443経由 |
+| `enable_emu` | `true` | **emu プラグインを起動時に有効化**（CTID Adversary Emulation Library を全clone＋ペイロード取得し、`- emu` を有効化してから初回起動）。`terraform apply` 一発で **FIN6 が使える状態**で立ち上がる。`false` で stockpile のみ（Super Spy 用） |
 | `rdp_cidr` | `""` | やられ役に**直接**RDP(3389)を開けたいIP `x.x.x.x/32`（FWが3389を通す環境向け。通常は Guacamole で十分） |
 | `disable_realtime_protection` | `false` | Defenderリアルタイム保護も無効化を試みる（Tamper Protectionで弾かれる場合あり） |
 

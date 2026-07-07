@@ -62,6 +62,45 @@ if [ -n "${PRIVIP:-}" ]; then
   sed -i "s|^app.contact.http: .*|app.contact.http: http://${PRIVIP}:8888|" /opt/caldera/conf/default.yml
 fi
 
+# --- Enable the emu plugin at BUILD time (CTID Adversary Emulation Library) -----
+# So `terraform apply` comes up FIN6-ready with no manual server steps, and so it
+# survives destroy/apply — a hand-enabled plugin is otherwise lost on every rebuild.
+# CALDERA writes its config back on shutdown, so default.yml MUST be edited BEFORE
+# the first start (done just below via systemd); editing a running server would be
+# overwritten. The emu plugin CODE ships as a CALDERA submodule (fetched by the
+# --recursive clone above); we then (1) add `- emu` with the SAME indent as the
+# existing list item (a misaligned item breaks the YAML), (2) install emu's Python
+# deps, (3) EXPLICITLY full-clone the CTID emulation-plans library — a partial
+# auto-clone leaves only some plans (e.g. turla) and FIN6 never generates — and
+# (4) best-effort fetch payloads (some upstream files 404; those abilities just fail
+# later, which is itself part of the exercise).
+if [ "${ENABLE_EMU:-true}" = "true" ]; then
+  git -C /opt/caldera submodule update --init plugins/emu || true
+  if [ -d /opt/caldera/plugins/emu ]; then
+    if ! grep -qE '^[[:space:]]*-[[:space:]]*emu[[:space:]]*$' /opt/caldera/conf/default.yml; then
+      sed -i 's/^\([[:space:]]*\)-[[:space:]]*stockpile[[:space:]]*$/\1- stockpile\n\1- emu/' /opt/caldera/conf/default.yml
+    fi
+    /opt/caldera/venv/bin/pip install -r /opt/caldera/plugins/emu/requirements.txt || true
+
+    rm -rf /opt/caldera/plugins/emu/data/adversary-emulation-plans
+    git clone --depth 1 \
+      https://github.com/center-for-threat-informed-defense/adversary_emulation_library \
+      /opt/caldera/plugins/emu/data/adversary-emulation-plans || true
+
+    apt-get install -y unzip p7zip-full openssl || true
+    ( cd /opt/caldera/plugins/emu && bash download_payloads.sh ) || true
+
+    # Log a sanity check (does NOT gate startup): is the FIN6 plan present?
+    if ls /opt/caldera/plugins/emu/data/adversary-emulation-plans/fin6/Emulation_Plan/yaml/ >/dev/null 2>&1; then
+      echo "emu: enabled; FIN6 emulation plan present"
+    else
+      echo "emu: WARNING enabled but FIN6 plan NOT found — re-check the library clone"
+    fi
+  else
+    echo "emu: WARNING plugin dir /opt/caldera/plugins/emu missing — left disabled"
+  fi
+fi
+
 # --- systemd unit (auto-restart, auto-start after reboot/session restart) ---
 cat > /etc/systemd/system/caldera.service <<'UNIT'
 [Unit]
