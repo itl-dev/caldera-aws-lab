@@ -110,8 +110,11 @@ aws ssm start-session --target <server_instance_id> --region us-east-1 \
 ## サーバへキーレスでシェル
 
 ```bash
-terraform output -raw ssm_shell_server | bash    # CloudShell で実行可（SSM=443）
+eval "$(terraform output -raw ssm_shell_server)"   # CloudShell で実行可（SSM=443）
 ```
+
+> ⚠️ 対話型セッションなので **`eval` を使う**こと。`... | bash` はサブシェルの stdin がパイプになり
+> `Cannot perform start session: EOF` で即切断される。
 
 API キー: `ADMIN123`（`--insecure` で `conf/default.yml` 使用）。
 
