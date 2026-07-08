@@ -41,9 +41,9 @@ variable "agent_group" {
 }
 
 variable "ui_cidr" {
-  description = "Open the CALDERA UI over HTTPS/443 (Caddy reverse-proxy) to this CIDR so a plain browser can reach it through 443-only firewalls — no client tooling needed. Set to a student's browser public IP (x.x.x.x/32), a campus CIDR, or 0.0.0.0/0 for a quick throwaway lab. Empty = closed (use SSM instead)."
+  description = "Open the CALDERA UI over HTTPS/443 (Caddy reverse-proxy) to this CIDR so a plain browser can reach it through 443-only firewalls — no client tooling needed. Defaults to 0.0.0.0/0 (fully open): campus firewalls often NAT the student's apparent public IP so a /32 allow-list silently fails to reach, so this lab standardizes on open access (CALDERA has a login; Guacamole is protected by a random password). Narrow to a browser public IP (x.x.x.x/32) or a campus CIDR where you reliably can. Empty = closed (use SSM instead)."
   type        = string
-  default     = ""
+  default     = "0.0.0.0/0"
 }
 
 variable "rdp_cidr" {
