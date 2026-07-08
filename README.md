@@ -175,6 +175,52 @@ terraform output -raw ui_url                # 新しい IP の UI を開く
 >
 > victim → サーバ 8888 は **VPC 内部のみ許可**なので、接続先は必ず **private IP**（public IP や 0.0.0.0 は不可）。private IP は stop/start で不変なので、コマンドはセッションを跨いで使い回せます。
 
+---
+
+## emu プラグイン（実在APTの再現）を手動で有効化・復旧する【発展】
+
+> **通常は不要**。`enable_emu=true`（既定）なら **ビルド時に自動で有効化**され、`terraform apply`
+> 一発で **FIN6 が使える状態**で立ち上がる（[変数表](#よく使う変数)・`userdata-server.sh` 参照）。
+> 以下は、**自動有効化が失敗したとき**（ライブラリ clone が途中で切れた等）や、**この自動化より前に
+> 作った古いサーバ**を後付けで有効化する**手動・復旧手順**。詳細な演習手順はコース教材
+> `演習手順_CALDERA体験_emu_FIN6.md` を参照。
+
+`emu` プラグイン本体は `git clone --recursive` で同梱済み（`/opt/caldera/plugins/emu`）。手動で有効化
+する場合は3つのハマりどころがあるので、**必ず下の順序**で行う（自動化 `userdata-server.sh` と同じ処理）。
+
+```bash
+eval "$(terraform output -raw ssm_shell_server)"   # サーバへ（対話型なので | bash は不可）
+sudo -i && cd /opt/caldera
+
+# 1) ★先に停止する。CALDERA は設定をファイルに書き戻すため、稼働中に default.yml を編集して
+#    restart すると停止時に旧設定で上書きされ、追記した「- emu」が消える。
+systemctl stop caldera
+
+# 2) plugins に「- emu」を追記。★既存項目と同じインデントで揃える（段がズレると YAML が壊れる）。
+#    既存の「- stockpile」行のインデントを複製すれば確実・冪等。
+grep -qE '^[[:space:]]*-[[:space:]]*emu[[:space:]]*$' conf/default.yml \
+  || sed -i 's/^\([[:space:]]*\)-[[:space:]]*stockpile[[:space:]]*$/\1- stockpile\n\1- emu/' conf/default.yml
+venv/bin/python3 -c "import yaml;d=yaml.safe_load(open('conf/default.yml'));assert 'emu' in d['plugins']"
+
+# 3) ★CTID ライブラリは「明示的に」フル clone する。emu の自動取得は
+#    「data/adversary-emulation-plans が存在し空でなければ clone をスキップ」する仕様で、
+#    自動取得が途中で切れると一部プラン（例: turla のみ）だけ残り FIN6 が生成されず件数0になる。
+rm -rf plugins/emu/data/adversary-emulation-plans
+git clone --depth 1 \
+  https://github.com/center-for-threat-informed-defense/adversary_emulation_library \
+  plugins/emu/data/adversary-emulation-plans
+ls plugins/emu/data/adversary-emulation-plans/fin6/Emulation_Plan/yaml/   # 取得確認
+
+# 4) 起動 → 各プランの */Emulation_Plan/yaml/*.yaml から abilities/adversaries を生成
+systemctl start caldera
+```
+
+- 起動後、UI の **plugins → emu** の abilities/adversaries 件数が **0でなくなり**、**adversaries に FIN6**
+  が現れれば成功。
+- **実ツール本体（payload）**は別途 `plugins/emu/download_payloads.sh` で取得（一部は配布元消滅で 404＝既知）。
+- 注意: emu の有効化は**サーバ上のランタイム状態**（`default.yml` 編集＋ライブラリ取得）なので、
+  `terraform destroy`／作り直しで消える。作り直したら本節を再実行する。
+
 ## 仕組み / 設計メモ
 
 - **AMI**: Amazon製 Quick Start（Ubuntu 22.04 / Windows Server 2022 Base）を `data` で自動最新解決。Marketplace AMIはLearner Lab非対応のため不使用。
@@ -187,7 +233,7 @@ terraform output -raw ui_url                # 新しい IP の UI を開く
 ### トラブルシュート
 - **エージェントが出てこない**: 通常は60分リトライ内に自動登録される。それでも出ない場合は
   `terraform apply -replace=aws_instance.victim[0]` でやられ役だけ作り直すと、起動済みサーバへ即コールバックします（その際、最初の apply と同じ `-var "ui_cidr=..."` を必ず付け直すこと。省くとUIの443ルールが消える）。
-- **UIが開かない**: ビルド完了まで5〜10分。`terraform output -raw ssm_shell_server | bash` でサーバに入り
+- **UIが開かない**: ビルド完了まで5〜10分。`eval "$(terraform output -raw ssm_shell_server)"` でサーバに入り
   `systemctl is-active caldera` / `journalctl -u caldera -f` を確認。
 - **Guacamoleで接続先が出ない/つながらない**: サーバのUIビルドに続けて guac 一式の導入に数分かかる。`journalctl -u guacd -f`、`systemctl status tomcat9 guac-sync.timer`、`cat /etc/guacamole/user-mapping.xml` を確認。やられ役を作り直した直後はタイマー(最大2分)での再発見待ち。
 
