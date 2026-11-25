@@ -64,6 +64,12 @@ variable "enable_guacamole" {
   default     = true
 }
 
+variable "caldera_ref" {
+  description = "CALDERA git ref (commit/tag/branch) to build. Pinned to the commit validated end-to-end with this lab (Super Spy rehearsal, 2026-11-18). Upstream master requires Python >= 3.11 since 2026-11-18 (#3432), which Ubuntu 22.04's Python 3.10 cannot satisfy, so do NOT set this to master/5.4.0+ without also moving the server to a newer Python. Empty = upstream default branch."
+  type        = string
+  default     = "cb8d6a8160e0f4990af323a7c071d5e8482b42c7"
+}
+
 variable "enable_emu" {
   description = "Enable the CALDERA 'emu' plugin at build time so the server comes up FIN6-ready: it adds `- emu` to the plugin list, full-clones the MITRE CTID Adversary Emulation Library, and best-effort fetches payloads BEFORE the first start. Set false for a stockpile-only lab (Super Spy). Because a hand-enabled plugin is lost on every destroy/apply, baking it in here makes the emulation exercises reproducible with a single `terraform apply`."
   type        = bool

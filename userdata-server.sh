@@ -4,7 +4,7 @@
 #  - systemd => survives the Learner Lab stop/start between sessions
 #
 #  NOTE: this is the script *body*. Terraform prepends the shebang and a few
-#  exported variables (ENABLE_GUACAMOLE, AWS_DEFAULT_REGION, VICTIM_ADMIN_PASSWORD,
+#  exported variables (ENABLE_GUACAMOLE, CALDERA_REF, AWS_DEFAULT_REGION, VICTIM_ADMIN_PASSWORD,
 #  GUAC_USER, GUAC_PASS) via aws_instance.server user_data in main.tf, so it is
 #  not meant to run standalone. `-x` is intentionally OFF so the injected
 #  password is not echoed into the bootstrap log.
@@ -38,10 +38,20 @@ ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
 
 # --- fetch CALDERA ---
 cd /opt
+# CALDERA is pinned to a known-good commit (CALDERA_REF, from var.caldera_ref) instead
+# of tracking master: upstream master moved to Python >= 3.11 on 2026-11-18 (#3432),
+# which Ubuntu 22.04 (Python 3.10) cannot install -> `No module named 'rich'` and a
+# crash-looping caldera.service. Clone, check out the ref, THEN init submodules so the
+# plugins match that commit's pins. (mitre/caldera now redirects to apache/caldera.)
 if [ ! -d /opt/caldera ]; then
-  git clone https://github.com/mitre/caldera.git --recursive
+  git clone https://github.com/apache/caldera.git /opt/caldera
+  if [ -n "${CALDERA_REF:-}" ]; then
+    git -C /opt/caldera checkout -q "$CALDERA_REF" || echo "WARNING: checkout of CALDERA_REF=$CALDERA_REF failed; staying on default branch"
+  fi
+  git -C /opt/caldera submodule update --init --recursive
 fi
 cd /opt/caldera
+echo "CALDERA at: $(git log -1 --format='%h %cd %s' --date=short)"
 
 # --- python venv + deps ---
 python3 -m venv /opt/caldera/venv
