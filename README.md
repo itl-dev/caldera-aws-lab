@@ -141,7 +141,7 @@ terraform output -raw guacamole_url       # => https://<server_public_ip>/guac/
 terraform output -raw guacamole_login     # => student / <自動生成パスワード>
 ```
 - ブラウザで `/guac/` を開く → `student` と上記パスワードでログイン → 接続先 **`caldera-victim-1`** を選ぶ → デスクトップ表示
-- やられ役の Administrator パスワードは自動生成（直接RDPやデスクトップ操作用に `terraform output -raw victim_admin_password` で確認可）
+- やられ役の Administrator パスワードは自動生成（直接RDPやデスクトップ操作用に `terraform output -raw victim_admin_password` で確認可）。Guacamole で「パスワードが違います」と出る場合は下の「トラブルシュート」参照
 - やられ役を増減/作り直しても、サーバが定期的に発見して接続一覧を自動更新（再applyは不要）
 
 > FWが 3389 を通す環境で**直接**RDPしたい場合のみ `-var "rdp_cidr=<自IP>/32"` で 3389 を開け、
@@ -240,6 +240,10 @@ systemctl start caldera
   `terraform apply -replace=aws_instance.victim[0]` でやられ役だけ作り直すと、起動済みサーバへ即コールバックします（`ui_cidr` は既定 `0.0.0.0/0` なので `-var` を付け直さなくても443ルールは維持される。個別に絞っている場合のみ同じ `-var "ui_cidr=..."` を付け直す）。
 - **UIが開かない**: ビルド完了まで5〜10分。`eval "$(terraform output -raw ssm_shell_server)"` でサーバに入り
   `systemctl is-active caldera` / `journalctl -u caldera -f` を確認。
+- **Guacamoleで Windows のログオン画面まで行くが「パスワードが違います」**: やられ役の初回起動時に Administrator パスワードの設定が反映されなかった状態。次の1コマンドで Guacamole と同じパスワードに設定し直し、30秒ほど後に `caldera-victim-1` へ接続し直す:
+  ```bash
+  terraform output -raw reset_victim_password | bash   # CommandId が表示されれば送信完了
+  ```
 - **Guacamoleで接続先が出ない/つながらない**: サーバのUIビルドに続けて guac 一式の導入に数分かかる。`journalctl -u guacd -f`、`systemctl status tomcat9 guac-sync.timer`、`cat /etc/guacamole/user-mapping.xml` を確認。やられ役を作り直した直後はタイマー(最大2分)での再発見待ち。
 
 ---

@@ -48,6 +48,17 @@ output "restart_agent" {
   value = "aws ssm send-command --region ${var.region} --document-name AWS-RunPowerShellScript --instance-ids ${join(" ", aws_instance.victim[*].id)} --parameters 'commands=[\"if (Test-Path C:\\\\Users\\\\Public\\\\start-sandcat.ps1) { powershell -NoProfile -ExecutionPolicy Bypass -File C:\\\\Users\\\\Public\\\\start-sandcat.ps1 } else { if (-not (Get-Process splunkd -ErrorAction SilentlyContinue)) { Start-Process -FilePath C:\\\\Users\\\\Public\\\\splunkd.exe -ArgumentList \\\"-server http://${aws_instance.server.private_ip}:8888 -group ${var.agent_group}\\\" -WindowStyle hidden } }\"]'"
 }
 
+# Re-set every victim's Administrator password to the value Guacamole uses. Use when
+# Guacamole reaches the Windows logon screen but it says the password is incorrect
+# (the first-boot password step did not take). The password travels base64-encoded
+# inside the command, so this output is marked sensitive (plain `terraform output`
+# hides it; -raw prints it). Run:  terraform output -raw reset_victim_password | bash
+# then reconnect to caldera-victim-1 in Guacamole after ~30s.
+output "reset_victim_password" {
+  value     = "aws ssm send-command --region ${var.region} --document-name AWS-RunPowerShellScript --instance-ids ${join(" ", aws_instance.victim[*].id)} --parameters '{\"commands\":[\"$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(\\\"${base64encode(random_password.victim_admin.result)}\\\")); Set-LocalUser -Name Administrator -Password (ConvertTo-SecureString $p -AsPlainText -Force) -PasswordNeverExpires $true; Write-Output PW_RESET_OK\"]}' --query Command.CommandId --output text"
+  sensitive = true
+}
+
 output "ui_login_hint" {
   value = "CALDERA UI login: red/admin (or admin/admin). API key: ADMIN123 (default.yml via --insecure)."
 }

@@ -47,10 +47,35 @@ for ($d = 1; $d -le 30; $d++) {
 # log in. NLA/SecurityLayer are disabled because a Mac/Guacamole RDP client with a
 # local account otherwise fails CredSSP pre-auth ("The credentials did not work")
 # even with the correct password.
+#
+# The password is set with Set-LocalUser (not `net user`) and then VERIFIED by an
+# actual credential check, retrying until it sticks. `net user` with a >14-char
+# password stops at an interactive "(Y/N)" prompt, and its failure was silent here:
+# RDP got enabled but Administrator kept EC2Launch's random password, so Guacamole
+# reached the Windows logon screen and was rejected with "password is incorrect".
+# Recovery for an already-built victim: terraform output -raw reset_victim_password | bash
 $adminPass = "${victim_admin_password}"
 if ($adminPass) {
-    net user Administrator "$adminPass"
-    Get-LocalUser -Name Administrator | Set-LocalUser -PasswordNeverExpires $true -ErrorAction SilentlyContinue
+    Add-Type -AssemblyName System.DirectoryServices.AccountManagement
+    $pwOk = $false
+    for ($p = 1; $p -le 20; $p++) {   # up to ~5 min
+        try {
+            Set-LocalUser -Name Administrator -Password (ConvertTo-SecureString $adminPass -AsPlainText -Force) -PasswordNeverExpires $true -ErrorAction Stop
+        } catch {
+            Write-Output "Set-LocalUser failed (attempt $p): $($_.Exception.Message); trying ADSI"
+            try { ([ADSI]"WinNT://./Administrator,user").SetPassword($adminPass) } catch {
+                Write-Output "ADSI SetPassword failed (attempt $p): $($_.Exception.Message)"
+            }
+        }
+        try {
+            $ctx = New-Object System.DirectoryServices.AccountManagement.PrincipalContext('Machine')
+            $pwOk = $ctx.ValidateCredentials('Administrator', $adminPass)
+        } catch { $pwOk = $false }
+        if ($pwOk) { Write-Output "Administrator password set and verified (attempt $p)"; break }
+        Write-Output "Administrator password not verified yet (attempt $p); retrying in 15s"
+        Start-Sleep -Seconds 15
+    }
+    if (-not $pwOk) { Write-Output "WARNING: Administrator password could NOT be verified; Guacamole login will fail. Run reset_victim_password." }
     $ts  = "HKLM:\System\CurrentControlSet\Control\Terminal Server"
     $rdp = "$ts\WinStations\RDP-Tcp"
     Set-ItemProperty -Path $ts  -Name fDenyTSConnections  -Value 0 -ErrorAction SilentlyContinue
