@@ -175,6 +175,7 @@ resource "aws_instance" "server" {
     "#!/bin/bash",
     "export ENABLE_GUACAMOLE=${var.enable_guacamole}",
     "export ENABLE_EMU=${var.enable_emu}",
+    "export CALDERA_REF='${var.caldera_ref}'",
     "export AWS_DEFAULT_REGION=${var.region}",
     "export VICTIM_ADMIN_PASSWORD='${random_password.victim_admin.result}'",
     "export GUAC_USER='student'",

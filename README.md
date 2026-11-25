@@ -230,6 +230,7 @@ systemctl start caldera
 
 - **AMI**: Amazon製 Quick Start（Ubuntu 22.04 / Windows Server 2022 Base）を `data` で自動最新解決。Marketplace AMIはLearner Lab非対応のため不使用。
 - **SSM**: `LabInstanceProfile`（=`LabRole`）を両インスタンスに付与。鍵もRDPも使わずシェル/ポートフォワードが可能。
+- **CALDERAのバージョン固定**: サーバは CALDERA を master 追従ではなく、`caldera_ref`（既定: 動作確認済みコミット `cb8d6a8`）に固定してビルドする。上流 master は 2026-11-18 以降 Python 3.11+ 必須になり、Ubuntu 22.04（Python 3.10）では依存の導入に失敗して起動しなくなったため。更新する場合は Learner Lab で Super Spy まで通しで確認してから `variables.tf` の既定値を変える。
 - **サーバ**: `systemd` 常駐（Learner Lab のセッション stop/start 後も自動復帰）。UIは Node 20 でビルド、sandcat は Go でオンデマンドコンパイル（systemdに `HOME`/`GOPATH`/`GOCACHE` を設定済み）。Go は **公式tarballの最新安定版**を導入（CALDERAは go>=1.19 が必須で、Ubuntu apt の 1.18.1 だと要件不足でコンパイルが不安定になるため）。
 - **UI公開**: `Caddy` が `443/HTTPS → 8888` を中継。**起動時に公開IPをSANに含む自己署名証明書を生成**し Caddy へ直接渡す（`tls internal` はホスト名なし `:443` だとIP宛て接続に証明書を提示できずTLS失敗するため不使用）。受講生はブラウザのみでアクセス可（443を通すFWで到達、初回だけ証明書警告→許可して進む）。`ui_cidr` でアクセス元を制限。
 - **やられ役**: EC2 ユーザーデータ(PowerShell)で Defender 除外 → sandcat を **最大60分リトライ**でDL・常駐。受け取ったバイナリが正規のWindows実行ファイル(MZヘッダ)で、起動後もプロセスが生きていることを確認できるまでリトライするので、サーバ準備に時間がかかっても確実に登録される。起動時に Administrator パスワード（Terraform `random_password` で自動生成）を設定し、RDPを有効化＋NLA無効化（Mac/Guacamoleの局所アカウントRDPがCredSSPで弾かれるのを回避）。
